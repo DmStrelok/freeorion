@@ -13,6 +13,7 @@
     (AddSpecial)                                \
     (AddStarlanes)                              \
     (Adequate)                                  \
+    (AdoptionCost)                              \
     (Affiliation)                               \
     (Age)                                       \
     (Aggressive)                                \
@@ -306,6 +307,7 @@
     (PlanetType)                                \
     (Playable)                                  \
     (PointDefense)                              \
+    (Policy)                                    \
     (Poor)                                      \
     (Population)                                \
     (PopulationCenter)                          \
