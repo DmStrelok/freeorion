@@ -525,6 +525,7 @@
     (Troops)                                    \
     (Tundra)                                    \
     (Turn)                                      \
+    (TurnPolicyAdopted)                         \
     (TurnsSinceFocusChange)                     \
     (TurnTechResearched)                        \
     (Type)                                      \
