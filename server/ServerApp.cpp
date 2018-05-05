@@ -2914,9 +2914,15 @@ namespace {
 
     /** Causes ResourceCenters (Planets) to update their focus records */
     void UpdateResourceCenterFocusHistoryInfo() {
-        for (auto& planet : GetUniverse().Objects().FindObjects<Planet>()) {
+        for (auto& planet : GetUniverse().Objects().FindObjects<Planet>())
             planet->UpdateFocusHistory();
-        }
+    }
+
+    /** Check validity of adopted policies, and overwrite initial adopted
+      * policies with those currently adopted */
+    void UpdateEmpirePolicies() {
+        for (auto id_empire_pair : Empires())
+            id_empire_pair.second->AuditPolicies();
     }
 
     /** Deletes empty fleets. */
@@ -2969,6 +2975,11 @@ void ServerApp::PreCombatProcessTurns() {
     // update ResourceCenter focus history info
     UpdateResourceCenterFocusHistoryInfo();
 
+    // validate adopted policies, and update Empire Policy history
+    // actual policy adoption and influence consumption occurrs during order
+    // execution above
+    UpdateEmpirePolicies();
+
     // clean up empty fleets that empires didn't order deleted
     CleanEmptyFleets();
 
@@ -2996,11 +3007,8 @@ void ServerApp::PreCombatProcessTurns() {
 
 
     DebugLogger() << "ServerApp::ProcessTurns movement";
-    // process movement phase
-
     // player notifications
     m_networking.SendMessageAll(TurnProgressMessage(Message::FLEET_MOVEMENT));
-
 
     // fleet movement
     auto fleets = objects.FindObjects<Fleet>();
@@ -3011,7 +3019,6 @@ void ServerApp::PreCombatProcessTurns() {
     // first move unowned fleets, or an empire fleet landing on them could wrongly
     // blockade them before they move
     for (auto& fleet : fleets) {
-        // save for possible SitRep generation after moving...
         if (fleet && fleet->Unowned())
             fleet->MovementPhase();
     }
@@ -3026,7 +3033,7 @@ void ServerApp::PreCombatProcessTurns() {
     m_universe.UpdateEmpireLatestKnownObjectsAndVisibilityTurns();
     m_universe.UpdateEmpireStaleObjectKnowledge();
 
-    // SitRep for fleets having arrived at destinations
+    // SitReps for fleets having arrived at destinations
     for (auto& fleet : fleets) {
         // save for possible SitRep generation after moving...
         if (!fleet || !fleet->ArrivedThisTurn())
@@ -3047,7 +3054,7 @@ void ServerApp::PreCombatProcessTurns() {
     for (auto player_it = m_networking.established_begin();
          player_it != m_networking.established_end(); ++player_it)
     {
-        PlayerConnectionPtr player = *player_it;
+        auto player = *player_it;
         bool use_binary_serialization = player->ClientVersionStringMatchesThisServer();
         player->SendMessage(TurnPartialUpdateMessage(PlayerEmpireID(player->PlayerID()),
                                                      m_universe, use_binary_serialization));
