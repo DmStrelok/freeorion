@@ -448,7 +448,7 @@ public:
     ~ConditionWidget()
     {}
 
-    std::unique_ptr<Condition::ConditionBase>       GetCondition() {
+    std::unique_ptr<Condition::ConditionBase> GetCondition() {
         GG::ListBox::iterator row_it = m_class_drop->CurrentItem();
         if (row_it == m_class_drop->end())
             return boost::make_unique<Condition::All>();
