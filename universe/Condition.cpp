@@ -6476,7 +6476,8 @@ bool EmpireStockpileValue::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct EmpireStockpileValueSimpleMatch {
-        EmpireStockpileValueSimpleMatch(float low, float high, ResourceType stockpile) :
+        EmpireStockpileValueSimpleMatch(int empire_id, float low, float high, ResourceType stockpile) :
+            m_empire_id(empire_id),
             m_low(low),
             m_high(high),
             m_stockpile(stockpile)
@@ -6486,23 +6487,28 @@ namespace {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
-                return false;
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
 
-            const Empire* empire = GetEmpire(candidate->Owner());
+            const Empire* empire = GetEmpire(actual_empire_id);
             if (!empire)
                 return false;
 
-            if (m_stockpile == RE_TRADE) {
+            try {
                 float amount = empire->ResourceStockpile(m_stockpile);
                 return (m_low <= amount && amount <= m_high);
+            } catch (...) {
+                return false;
             }
-
-            return false;
         }
 
-        float m_low;
-        float m_high;
+        int         m_empire_id;
+        float       m_low;
+        float       m_high;
         ResourceType m_stockpile;
     };
 }
@@ -6511,15 +6517,19 @@ void EmpireStockpileValue::Eval(const ScriptingContext& parent_context,
                                 ObjectSet& matches, ObjectSet& non_matches,
                                 SearchDomain search_domain/* = NON_MATCHES*/) const
 {
-    bool simple_eval_safe = (m_low->LocalCandidateInvariant() && m_high->LocalCandidateInvariant() &&
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
+    bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
+                             (!m_low || m_low->LocalCandidateInvariant()) &&
+                             (!m_high || m_high->LocalCandidateInvariant()) &&
                              (parent_context.condition_root_candidate || RootCandidateInvariant()));
     if (simple_eval_safe) {
         // evaluate number limits once, use to match all candidates
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
-        float low = m_low->Eval(local_context);
-        float high = m_high->Eval(local_context);
-        EvalImpl(matches, non_matches, search_domain, EmpireStockpileValueSimpleMatch(low, high, m_stockpile));
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
+        float low = (m_low ? m_low->Eval(local_context) : -Meter::LARGE_VALUE);
+        float high = (m_high ? m_high->Eval(local_context) : Meter::LARGE_VALUE);
+        EvalImpl(matches, non_matches, search_domain, EmpireStockpileValueSimpleMatch(empire_id, low, high, m_stockpile));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -6565,7 +6575,7 @@ std::string EmpireStockpileValue::Dump(unsigned short ntabs) const {
     case RE_TRADE:      retval += "OwnerTradeStockpile";    break;
     case RE_RESEARCH:   retval += "OwnerResearchStockpile"; break;
     case RE_INDUSTRY:   retval += "OwnerIndustryStockpile"; break;
-    default: retval += "?"; break;
+    default:            retval += "?";                      break;
     }
     if (m_empire_id)
         retval += " empire = " + m_empire_id->Dump(ntabs);
@@ -6584,9 +6594,13 @@ bool EmpireStockpileValue::Match(const ScriptingContext& local_context) const {
         return false;
     }
 
-    float low = m_low->Eval(local_context);
-    float high = m_high->Eval(local_context);
-    return EmpireStockpileValueSimpleMatch(low, high, m_stockpile)(candidate);
+    int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
+    if (empire_id == ALL_EMPIRES)
+        return false;
+    float low = (m_low ? m_low->Eval(local_context) : -Meter::LARGE_VALUE);
+    float high = (m_high ? m_high->Eval(local_context) : Meter::LARGE_VALUE);
+
+    return EmpireStockpileValueSimpleMatch(empire_id, low, high, m_stockpile)(candidate);
 }
 
 void EmpireStockpileValue::SetTopLevelContent(const std::string& content_name) {
@@ -6648,27 +6662,31 @@ bool EmpireHasAdoptedPolicy::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct EmpireHasAdoptedPolicySimpleMatch {
-        EmpireHasAdoptedPolicySimpleMatch(const std::string& name, int empire_id) :
-            m_name(name),
-            m_empire_id(empire_id)
+        EmpireHasAdoptedPolicySimpleMatch(int empire_id, const std::string& name) :
+            m_empire_id(empire_id),
+            m_name(name)
         {}
 
         bool operator()(std::shared_ptr<const UniverseObject> candidate) const {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
-                return false;
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
 
-            const Empire* empire = GetEmpire(m_empire_id);
+            const Empire* empire = GetEmpire(actual_empire_id);
             if (!empire)
                 return false;
 
             return empire->PolicyAdopted(m_name);
         }
 
+        int         m_empire_id;
         std::string m_name;
-        int m_empire_id;
     };
 }
 
@@ -6676,6 +6694,7 @@ void EmpireHasAdoptedPolicy::Eval(const ScriptingContext& parent_context,
                                   ObjectSet& matches, ObjectSet& non_matches,
                                   SearchDomain search_domain/* = NON_MATCHES*/) const
 {
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
     bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
                              (!m_name || m_name->LocalCandidateInvariant()) &&
                              (parent_context.condition_root_candidate || RootCandidateInvariant()));
@@ -6684,8 +6703,8 @@ void EmpireHasAdoptedPolicy::Eval(const ScriptingContext& parent_context,
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
         std::string name = m_name ? m_name->Eval(local_context) : "";
-        int empire_id = m_empire_id->Eval(local_context);   // if m_empire_id not set, default to local candidate's owner, which is not target invariant
-        EvalImpl(matches, non_matches, search_domain, EmpireHasAdoptedPolicySimpleMatch(name, empire_id));
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
+        EvalImpl(matches, non_matches, search_domain, EmpireHasAdoptedPolicySimpleMatch(empire_id, name));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -6736,11 +6755,13 @@ bool EmpireHasAdoptedPolicy::Match(const ScriptingContext& local_context) const 
         ErrorLogger() << "EmpireHasAdoptedPolicy::Match passed no candidate object";
         return false;
     }
+
     int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
     if (empire_id == ALL_EMPIRES)
         return false;
     std::string name = m_name ? m_name->Eval(local_context) : "";
-    return EmpireHasAdoptedPolicySimpleMatch(name, empire_id)(candidate);
+
+    return EmpireHasAdoptedPolicySimpleMatch(empire_id, name)(candidate);
 }
 
 void EmpireHasAdoptedPolicy::SetTopLevelContent(const std::string& content_name) {
@@ -6795,7 +6816,8 @@ bool OwnerHasTech::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct OwnerHasTechSimpleMatch {
-        OwnerHasTechSimpleMatch(const std::string& name) :
+        OwnerHasTechSimpleMatch(int empire_id, const std::string& name) :
+            m_empire_id(empire_id),
             m_name(name)
         {}
 
@@ -6803,15 +6825,21 @@ namespace {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
+
+            const Empire* empire = GetEmpire(actual_empire_id);
+            if (!empire)
                 return false;
 
-            if (const Empire* empire = GetEmpire(candidate->Owner()))
-                return empire->TechResearched(m_name);
-
-            return false;
+            return empire->TechResearched(m_name);
         }
 
+        int         m_empire_id;
         std::string m_name;
     };
 }
@@ -6820,14 +6848,17 @@ void OwnerHasTech::Eval(const ScriptingContext& parent_context,
                         ObjectSet& matches, ObjectSet& non_matches,
                         SearchDomain search_domain/* = NON_MATCHES*/) const
 {
-    bool simple_eval_safe = (!m_name || m_name->LocalCandidateInvariant()) &&
-                            (parent_context.condition_root_candidate || RootCandidateInvariant());
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
+    bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
+                             (!m_name || m_name->LocalCandidateInvariant()) &&
+                             (parent_context.condition_root_candidate || RootCandidateInvariant()));
     if (simple_eval_safe) {
         // evaluate number limits once, use to match all candidates
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
         std::string name = m_name ? m_name->Eval(local_context) : "";
-        EvalImpl(matches, non_matches, search_domain, OwnerHasTechSimpleMatch(name));
+        EvalImpl(matches, non_matches, search_domain, OwnerHasTechSimpleMatch(empire_id, name));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -6879,8 +6910,12 @@ bool OwnerHasTech::Match(const ScriptingContext& local_context) const {
         return false;
     }
 
+    int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
+    if (empire_id == ALL_EMPIRES)
+        return false;
     std::string name = m_name ? m_name->Eval(local_context) : "";
-    return OwnerHasTechSimpleMatch(name)(candidate);
+
+    return OwnerHasTechSimpleMatch(empire_id, name)(candidate);
 }
 
 void OwnerHasTech::SetTopLevelContent(const std::string& content_name) {
@@ -6943,7 +6978,8 @@ bool OwnerHasBuildingTypeAvailable::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct OwnerHasBuildingTypeAvailableSimpleMatch {
-        OwnerHasBuildingTypeAvailableSimpleMatch(const std::string& name) :
+        OwnerHasBuildingTypeAvailableSimpleMatch(int empire_id, const std::string& name) :
+            m_empire_id(empire_id),
             m_name(name)
         {}
 
@@ -6951,15 +6987,21 @@ namespace {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
+
+            const Empire* empire = GetEmpire(actual_empire_id);
+            if (!empire)
                 return false;
 
-            if (const Empire* empire = GetEmpire(candidate->Owner()))
-                return empire->BuildingTypeAvailable(m_name);
-
-            return false;
+            return empire->BuildingTypeAvailable(m_name);
         }
 
+        int         m_empire_id;
         std::string m_name;
     };
 }
@@ -6968,14 +7010,17 @@ void OwnerHasBuildingTypeAvailable::Eval(const ScriptingContext& parent_context,
                                          ObjectSet& matches, ObjectSet& non_matches,
                                          SearchDomain search_domain/* = NON_MATCHES*/) const
 {
-    bool simple_eval_safe = (!m_name || m_name->LocalCandidateInvariant()) &&
-                            (parent_context.condition_root_candidate || RootCandidateInvariant());
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
+    bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
+                             (!m_name || m_name->LocalCandidateInvariant()) &&
+                             (parent_context.condition_root_candidate || RootCandidateInvariant()));
     if (simple_eval_safe) {
         // evaluate number limits once, use to match all candidates
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
         std::string name = m_name ? m_name->Eval(local_context) : "";
-        EvalImpl(matches, non_matches, search_domain, OwnerHasBuildingTypeAvailableSimpleMatch(name));
+        EvalImpl(matches, non_matches, search_domain, OwnerHasBuildingTypeAvailableSimpleMatch(empire_id, name));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -7022,8 +7067,12 @@ bool OwnerHasBuildingTypeAvailable::Match(const ScriptingContext& local_context)
         return false;
     }
 
+    int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
+    if (empire_id == ALL_EMPIRES)
+        return false;
     std::string name = m_name ? m_name->Eval(local_context) : "";
-    return OwnerHasBuildingTypeAvailableSimpleMatch(name)(candidate);
+
+    return OwnerHasBuildingTypeAvailableSimpleMatch(empire_id, name)(candidate);
 }
 
 void OwnerHasBuildingTypeAvailable::SetTopLevelContent(const std::string& content_name) {
@@ -7086,23 +7135,30 @@ bool OwnerHasShipDesignAvailable::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct OwnerHasShipDesignAvailableSimpleMatch {
-        OwnerHasShipDesignAvailableSimpleMatch(int id) :
-            m_id(id)
+        OwnerHasShipDesignAvailableSimpleMatch(int empire_id, int design_id) :
+            m_empire_id(empire_id),
+            m_id(design_id)
         {}
 
         bool operator()(std::shared_ptr<const UniverseObject> candidate) const {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
+
+            const Empire* empire = GetEmpire(actual_empire_id);
+            if (!empire)
                 return false;
 
-            if (const Empire* empire = GetEmpire(candidate->Owner()))
-                return empire->ShipDesignAvailable(m_id);
-
-            return false;
+            return empire->ShipDesignAvailable(m_id);
         }
 
+        int m_empire_id;
         int m_id;
     };
 }
@@ -7111,14 +7167,17 @@ void OwnerHasShipDesignAvailable::Eval(const ScriptingContext& parent_context,
                                        ObjectSet& matches, ObjectSet& non_matches,
                                        SearchDomain search_domain/* = NON_MATCHES*/) const
 {
-    bool simple_eval_safe = (!m_id || m_id->LocalCandidateInvariant()) &&
-                            (parent_context.condition_root_candidate || RootCandidateInvariant());
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
+    bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
+                             (!m_id || m_id->LocalCandidateInvariant()) &&
+                             (parent_context.condition_root_candidate || RootCandidateInvariant()));
     if (simple_eval_safe) {
         // evaluate number limits once, use to match all candidates
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
-        int id = m_id ? m_id->Eval(local_context) : INVALID_DESIGN_ID;
-        EvalImpl(matches, non_matches, search_domain, OwnerHasShipDesignAvailableSimpleMatch(id));
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
+        int design_id = m_id ? m_id->Eval(local_context) : INVALID_DESIGN_ID;
+        EvalImpl(matches, non_matches, search_domain, OwnerHasShipDesignAvailableSimpleMatch(empire_id, design_id));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -7165,8 +7224,12 @@ bool OwnerHasShipDesignAvailable::Match(const ScriptingContext& local_context) c
         return false;
     }
 
-    int id = m_id ? m_id->Eval(local_context) : INVALID_DESIGN_ID;
-    return OwnerHasShipDesignAvailableSimpleMatch(id)(candidate);
+    int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
+    if (empire_id == ALL_EMPIRES)
+        return false;
+    int design_id = m_id ? m_id->Eval(local_context) : INVALID_DESIGN_ID;
+
+    return OwnerHasShipDesignAvailableSimpleMatch(empire_id, design_id)(candidate);
 }
 
 void OwnerHasShipDesignAvailable::SetTopLevelContent(const std::string& content_name) {
@@ -7230,7 +7293,8 @@ bool OwnerHasShipPartAvailable::operator==(const ConditionBase& rhs) const {
 
 namespace {
     struct OwnerHasShipPartAvailableSimpleMatch {
-        OwnerHasShipPartAvailableSimpleMatch(const std::string& name) :
+        OwnerHasShipPartAvailableSimpleMatch(int empire_id, const std::string& name) :
+            m_empire_id(empire_id),
             m_name(name)
         {}
 
@@ -7238,15 +7302,21 @@ namespace {
             if (!candidate)
                 return false;
 
-            if (candidate->Unowned())
+            int actual_empire_id = m_empire_id;
+            if (m_empire_id == ALL_EMPIRES) {
+                if (candidate->Unowned())
+                    return false;
+                actual_empire_id = candidate->Owner();
+            }
+
+            const Empire* empire = GetEmpire(actual_empire_id);
+            if (!empire)
                 return false;
 
-            if (const Empire* empire = GetEmpire(candidate->Owner()))
-                return empire->ShipPartAvailable(m_name);
-
-            return false;
+            return empire->ShipPartAvailable(m_name);
         }
 
+        int         m_empire_id;
         std::string m_name;
     };
 }
@@ -7255,16 +7325,17 @@ void OwnerHasShipPartAvailable::Eval(const ScriptingContext& parent_context,
                                      ObjectSet& matches, ObjectSet& non_matches,
                                      SearchDomain search_domain/* = NON_MATCHES*/) const
 {
-    bool simple_eval_safe = (!m_name || m_name->LocalCandidateInvariant()) &&
-                            (parent_context.condition_root_candidate ||
-                             RootCandidateInvariant());
+    // if m_empire_id not set, the local candidate's owner is used, which is not target invariant
+    bool simple_eval_safe = ((m_empire_id && m_empire_id->LocalCandidateInvariant()) &&
+                             (!m_name || m_name->LocalCandidateInvariant()) &&
+                             (parent_context.condition_root_candidate || RootCandidateInvariant()));
     if (simple_eval_safe) {
         // evaluate number limits once, use to match all candidates
         std::shared_ptr<const UniverseObject> no_object;
         ScriptingContext local_context(parent_context, no_object);
+        int empire_id = m_empire_id->Eval(local_context);   // check above should ensure m_empire_id is non-null
         std::string name = m_name ? m_name->Eval(local_context) : "";
-        EvalImpl(matches, non_matches, search_domain,
-                 OwnerHasShipPartAvailableSimpleMatch(name));
+        EvalImpl(matches, non_matches, search_domain, OwnerHasShipPartAvailableSimpleMatch(empire_id, name));
     } else {
         // re-evaluate allowed turn range for each candidate object
         ConditionBase::Eval(parent_context, matches, non_matches, search_domain);
@@ -7309,8 +7380,12 @@ bool OwnerHasShipPartAvailable::Match(const ScriptingContext& local_context) con
         return false;
     }
 
+    int empire_id = (m_empire_id ? m_empire_id->Eval(local_context) : candidate->Owner());
+    if (empire_id == ALL_EMPIRES)
+        return false;
     std::string name = m_name ? m_name->Eval(local_context) : "";
-    return OwnerHasShipPartAvailableSimpleMatch(name)(candidate);
+
+    return OwnerHasShipPartAvailableSimpleMatch(empire_id, name)(candidate);
 }
 
 void OwnerHasShipPartAvailable::SetTopLevelContent(const std::string& content_name) {
