@@ -187,6 +187,7 @@
     (If)                                        \
     (Industry)                                  \
     (Inferno)                                   \
+    (Influence)                                 \
     (InSystem)                                  \
     (Interceptor)                               \
     (Integer)                                   \
@@ -378,6 +379,7 @@
     (SetFuel)                                   \
     (SetHappiness)                              \
     (SetIndustry)                               \
+    (SetInfluence)                              \
     (SetMaxCapacity)                            \
     (SetMaxDamage)                              \
     (SetMaxDefense)                             \
@@ -414,11 +416,10 @@
     (SetTargetConstruction)                     \
     (SetTargetHappiness)                        \
     (SetTargetIndustry)                         \
+    (SetTargetInfluence)                        \
     (SetTargetPopulation)                       \
     (SetTargetResearch)                         \
-    (SetTargetTrade)                            \
     (SetTexture)                                \
-    (SetTrade)                                  \
     (SetTroops)                                 \
     (SetVisibility)
 
@@ -504,9 +505,9 @@
     (TargetConstruction)                        \
     (TargetHappiness)                           \
     (TargetIndustry)                            \
+    (TargetInfluence)                           \
     (TargetPopulation)                          \
     (TargetResearch)                            \
-    (TargetTrade)                               \
     (Tech)                                      \
     (Terran)                                    \
     (TestValue)                                 \
